@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from sklearn.ensemble import RandomForestRegressor
 
 st.set_page_config(page_title="Step 2: Agentic AI Portfolio Builder", layout="wide")
 
@@ -93,28 +92,43 @@ if data.empty or data.isnull().all().all():
 
 norm_prices = data.div(data.iloc[0]) * 100
 
-# --- AI OPTIMIZATION: ML-BASED SUGGESTED WEIGHTS (with robust cleaning) ---
+# --- AI OPTIMIZATION: SUGGESTED WEIGHTS BASED ON RECENT PERFORMANCE ---
 def ai_optimize_weights(prices, risk_profile):
+    # Use most recent 1-year (or all available) total return as "AI" weights
     lookback = min(252, len(prices))
-    returns = prices.pct_change().fillna(0).iloc[-lookback:]
-    X = returns.values
-    y = (prices.iloc[-1] / prices.iloc[0] - 1).values  # total return over period
-
-    # Clean X and y: replace inf/-inf with nan, then nan with 0
-    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
-    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
-
-    model = RandomForestRegressor(n_estimators=100)
-    model.fit(X, y)
-    importances = model.feature_importances_
-
-    # Risk profile adjustment
-    if risk_profile == "Conservative":
-        importances = np.clip(importances, 0, 0.25)
-    elif risk_profile == "Moderate":
-        importances = np.clip(importances, 0, 0.5)
-    optimal_weights = importances / importances.sum()
-    return optimal_weights
+    returns = prices.iloc[-1] / prices.iloc[-lookback] - 1
+    returns = np.nan_to_num(returns, nan=0.0, posinf=0.0, neginf=0.0)
+    # If all returns are zero (flat), fallback to equal weight
+    if np.allclose(returns, 0):
+        weights = np.repeat(1/len(returns), len(returns))
+    else:
+        # Risk profile adjustment
+        if risk_profile == "Conservative":
+            # Cap any single weight at 30%
+            raw = np.clip(returns, 0, None)
+            if raw.sum() == 0:
+                weights = np.repeat(1/len(raw), len(raw))
+            else:
+                weights = raw / raw.sum()
+                weights = np.clip(weights, 0, 0.3)
+                weights = weights / weights.sum()
+        elif risk_profile == "Moderate":
+            # Cap at 50%
+            raw = np.clip(returns, 0, None)
+            if raw.sum() == 0:
+                weights = np.repeat(1/len(raw), len(raw))
+            else:
+                weights = raw / raw.sum()
+                weights = np.clip(weights, 0, 0.5)
+                weights = weights / weights.sum()
+        else:
+            # Aggressive: allow up to 100%
+            raw = np.clip(returns, 0, None)
+            if raw.sum() == 0:
+                weights = np.repeat(1/len(raw), len(raw))
+            else:
+                weights = raw / raw.sum()
+    return weights
 
 ai_weights = ai_optimize_weights(data[selected_stocks], risk_profile)
 ai_index = (norm_prices[selected_stocks] * ai_weights).sum(axis=1)
@@ -177,7 +191,7 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
             f"(shown below) that would have produced a higher return ({ai_return*100:.2f}%) than your allocation ({user_return*100:.2f}%)."
         )
         feedback.append(
-            "AI-optimized weights are calculated using machine learning on recent price patterns and adjusted for your risk profile."
+            "AI-optimized weights are calculated using recent price patterns and adjusted for your risk profile."
         )
         feedback.append(
             "Try using the AI-optimized weights for a more tailored, data-driven approach."
@@ -240,4 +254,5 @@ st.markdown("""
 - **Agentic AI Feedback:**  
   Personalized, actionable, and educational guidance—unique to your portfolio, your choices, and the market right now.
 """)
+
 
