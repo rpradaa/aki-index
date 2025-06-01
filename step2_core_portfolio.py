@@ -93,12 +93,16 @@ if data.empty or data.isnull().all().all():
 
 norm_prices = data.div(data.iloc[0]) * 100
 
-# --- AI OPTIMIZATION: ML-BASED SUGGESTED WEIGHTS ---
+# --- AI OPTIMIZATION: ML-BASED SUGGESTED WEIGHTS (with robust cleaning) ---
 def ai_optimize_weights(prices, risk_profile):
     lookback = min(252, len(prices))
     returns = prices.pct_change().fillna(0).iloc[-lookback:]
     X = returns.values
     y = (prices.iloc[-1] / prices.iloc[0] - 1).values  # total return over period
+
+    # Clean X and y: replace inf/-inf with nan, then nan with 0
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
+    y = np.nan_to_num(y, nan=0.0, posinf=0.0, neginf=0.0)
 
     model = RandomForestRegressor(n_estimators=100)
     model.fit(X, y)
@@ -236,3 +240,4 @@ st.markdown("""
 - **Agentic AI Feedback:**  
   Personalized, actionable, and educational guidance—unique to your portfolio, your choices, and the market right now.
 """)
+
