@@ -4,19 +4,53 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 
-# --- CONFIG & STYLE ---
-st.set_page_config(page_title="Agentic AI Portfolio Builder", layout="wide")
-st.markdown("""
+# --- DARK THEME & CUSTOM STYLES ---
+st.markdown(
+    """
     <style>
-    body, .stApp { color: #222 !important; background-color: #f7fafd !important; }
-    .metric-label { font-size: 18px; color: #555; }
-    .metric-value { font-size: 28px; font-weight: bold; }
-    .advisor-feedback { background: #e3f2fd; border-left: 5px solid #1976d2; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
-    .section-header { font-size: 22px; color: #1976d2; margin-top: 2em;}
-    .alt-suggestion { background: #fff8e1; border-left: 5px solid #ffb300; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
-    .peer-feedback { background: #f1f8e9; border-left: 5px solid #388e3c; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
+    .stApp { background-color: #0e1117; color: #fafafa; }
+    .section-header {
+        color: #1a73e8;
+        font-weight: 600;
+        margin-top: 2em;
+        font-size: 22px;
+    }
+    .advisor-feedback {
+        background: #1f2937;
+        border-left: 5px solid #1a73e8;
+        padding: 1em;
+        margin-bottom: 1em;
+        border-radius: 8px;
+        color: #e0e7ff;
+    }
+    .alt-suggestion {
+        background: #3b4252;
+        border-left: 5px solid #fbbf24;
+        padding: 1em;
+        margin-bottom: 1em;
+        border-radius: 8px;
+        color: #fffacd;
+    }
+    .peer-feedback {
+        background: #2e3440;
+        border-left: 5px solid #88c0d0;
+        padding: 1em;
+        margin-bottom: 1em;
+        border-radius: 8px;
+        color: #d8dee9;
+    }
+    .metric-label { color: #a0aec0; font-weight: 500; }
+    .metric-value { color: #fafafa; font-weight: 700; font-size: 28px; }
+    .streamlit-expanderHeader {
+        color: #63b3ed;
+        font-weight: 600;
+    }
+    a { color: #63b3ed; text-decoration: none; }
+    a:hover { text-decoration: underline; }
     </style>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 # --- HEADER ---
 st.title("Step 2: Foundation — Agentic AI Portfolio Builder")
@@ -175,7 +209,6 @@ peer_returns = {k: ((norm_prices[selected_stocks] * v).sum(axis=1).iloc[-1] / (n
 # --- DETAILED, ADVISOR-LIKE FEEDBACK ENGINE ---
 def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method, investment_goal, peer_returns):
     feedback = []
-    # Portfolio summary
     top_stock = selected_stocks[np.argmax(weights)]
     feedback.append(
         f"<b>Portfolio Summary:</b><br>"
@@ -184,7 +217,6 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
         f"- <b>Risk Profile:</b> {risk_profile}<br>"
         f"- <b>Investment Goal:</b> {investment_goal}"
     )
-    # Market context
     if pe_ratios.notna().any():
         overvalued = pe_ratios[pe_ratios > 40]
         undervalued = pe_ratios[pe_ratios < 20]
@@ -192,20 +224,14 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
             feedback.append(f"⚠️ <b>High P/E Alert:</b> {', '.join(overvalued.index)} have high P/E ratios. Consider if these fit your risk and goal.")
         if not undervalued.empty:
             feedback.append(f"🟢 <b>Value Alert:</b> {', '.join(undervalued.index)} have lower P/E ratios, which may offer value opportunities.")
-
-    # Risk & diversification
     if np.max(weights) > 0.5:
         feedback.append("⚠️ <b>Concentration Risk:</b> More than 50% in one stock. This can lead to high volatility and risk. Diversification is generally safer.")
     elif np.max(weights) < 0.3 and len(selected_stocks) > 2:
         feedback.append("✅ <b>Good Diversification:</b> No single stock dominates your portfolio. This can help smooth returns and reduce risk.")
-
-    # Investment goal alignment
     if investment_goal == "Capital Preservation" and risk_profile != "Conservative":
         feedback.append("⚠️ You selected 'Capital Preservation' but a non-conservative risk profile. Consider aligning these for consistency.")
     if investment_goal == "Aggressive Growth" and risk_profile == "Conservative":
         feedback.append("⚠️ Aggressive growth goals may not be realistic with a conservative risk profile. Consider increasing risk tolerance or adjusting goals.")
-
-    # Performance comparison
     if user_return < ai_return:
         feedback.append(
             f"💡 <b>AI Suggestion:</b> Based on recent market data and your risk profile, our AI recommends an alternative allocation "
@@ -219,14 +245,10 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
         feedback.append("✅ <b>Great job!</b> Your allocation outperformed the AI-optimized approach for this period.")
     else:
         feedback.append("ℹ️ Your portfolio performed similarly to the AI-optimized approach.")
-
-    # Peer comparison
     peer_msgs = []
     for peer, ret in peer_returns.items():
         peer_msgs.append(f"{peer}: {ret*100:.2f}%")
     feedback.append(f"<b>Peer Comparison:</b> Typical {', '.join(peer_msgs)} returns for these stocks and risk profiles.")
-
-    # Educational tip
     feedback.append(
         "🧠 <b>Portfolio Tip:</b> A strong foundation is built on diversification, risk awareness, and adapting to market conditions. "
         "Review your allocations regularly and align them with your long-term goals."
@@ -279,7 +301,7 @@ st.plotly_chart(fig, use_container_width=True)
 
 st.markdown('<div class="section-header">Index Ratio (Your Index / S&P 500)</div>', unsafe_allow_html=True)
 fig2 = go.Figure()
-fig2.add_trace(go.Scatter(x=ratio.index, y=ratio, name="Index Ratio", line=dict(width=2, color='#673ab7')))
+fig2.add_trace(go.Scatter(x=ratio.index, y=ratio, name="Index Ratio", line=dict(width=2, color='#fbbf24')))
 fig2.update_layout(
     xaxis_title="Date",
     yaxis_title="Ratio",
@@ -325,3 +347,4 @@ st.markdown("""
 > Experiment with weights, scenarios, and peer strategies to deepen your understanding.  
 > This is the foundation for advanced analytics and agentic investing in future steps.
 """)
+
