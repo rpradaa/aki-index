@@ -3,41 +3,65 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from sklearn.ensemble import RandomForestRegressor
 
-st.set_page_config(page_title="Agentic Adaptive Index", layout="wide")
+st.set_page_config(page_title="Step 2: Agentic AI Portfolio Builder", layout="wide")
 
-st.title("Craft Your Core Portfolio (ω & P) — Agentic AI Foundation")
+st.title("Step 2: Foundation — Build Your Custom Index with Agentic AI Guidance")
 st.markdown("""
-### Step 2: Foundation — Build, Analyze, and Learn with Agentic AI Guidance
-
-This tool lets you construct your own index from the **Magnificent 7** tech stocks, assign weights (manually or with AI guidance), and compare to the S&P 500.  
-You'll get real-time, context-aware feedback and actionable insights—just like a portfolio manager with an AI co-pilot.
+**Construct your own index from the Magnificent 7 tech stocks, choose your weights, and compare to the S&P 500.  
+Our AI advisor analyzes your portfolio, current market valuations, and your risk profile—offering tailored feedback and optimization suggestions.**
 ---
 """)
 
-# --- SIDEBAR: USER INPUTS ---
-st.sidebar.header("Portfolio Builder")
+# --- USER PROFILE ---
+st.sidebar.header("Investor Profile")
+risk_profile = st.sidebar.selectbox(
+    "Your Risk Tolerance",
+    ["Conservative", "Moderate", "Aggressive"],
+    help="AI will optimize and critique your portfolio based on this."
+)
 
-start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
-end_date = st.sidebar.date_input("End Date", pd.to_datetime("2024-12-31"))
-if start_date >= end_date:
-    st.sidebar.error("Start Date must be before End Date.")
-    st.stop()
-
+# --- STOCK SELECTION ---
 magnificent_7 = ['AAPL', 'MSFT', 'GOOG', 'AMZN', 'META', 'NVDA', 'TSLA']
 selected_stocks = st.sidebar.multiselect(
     "Select 1-7 Tech Stocks (Magnificent 7)",
     options=magnificent_7,
     default=magnificent_7[:3]
 )
-if len(selected_stocks) == 0:
-    st.warning("Please select at least one stock.")
+if not selected_stocks:
+    st.warning("Select at least 1 stock.")
     st.stop()
 
-weight_method = st.sidebar.selectbox(
-    "Choose Weighting Method",
-    options=["Equal Weight", "Custom Weights", "AI-Guided Weights"]
+# --- WEIGHTING METHOD ---
+weight_method = st.sidebar.radio(
+    "Weighting Method",
+    ["Equal Weight", "Manual"],
+    help="Choose how to assign weights to your selected stocks."
 )
+
+# --- WEIGHTS LOGIC ---
+if weight_method == "Equal Weight":
+    weights = np.repeat(1/len(selected_stocks), len(selected_stocks))
+    method_desc = "Each stock has equal influence in your index."
+else:
+    weights = []
+    st.sidebar.markdown("Enter custom weights (must sum to 1):")
+    for stock in selected_stocks:
+        w = st.sidebar.number_input(
+            f"Weight for {stock}",
+            min_value=0.0,
+            max_value=1.0,
+            value=round(1/len(selected_stocks), 2),
+            step=0.01,
+            key=stock
+        )
+        weights.append(w)
+    weights = np.array(weights)
+    if not np.isclose(weights.sum(), 1.0):
+        st.warning("Custom weights must sum to 1. Adjust your weights.")
+        st.stop()
+    method_desc = "Your custom weights reflect your own views or strategy."
 
 # --- DATA FETCHING ---
 @st.cache_data(show_spinner=True)
@@ -55,6 +79,12 @@ def fetch_data(tickers, start, end):
         data = df
     return data
 
+start_date = st.sidebar.date_input("Start Date", pd.to_datetime("2020-01-01"))
+end_date = st.sidebar.date_input("End Date", pd.to_datetime("2024-12-31"))
+if start_date >= end_date:
+    st.sidebar.error("Start Date must be before End Date.")
+    st.stop()
+
 tickers = selected_stocks + ['^GSPC']
 data = fetch_data(tickers, start_date, end_date)
 if data.empty or data.isnull().all().all():
@@ -63,119 +93,116 @@ if data.empty or data.isnull().all().all():
 
 norm_prices = data.div(data.iloc[0]) * 100
 
-# --- AGENTIC/AI GUIDANCE: SUGGESTED WEIGHTS BASED ON VOLATILITY ---
-def ai_guided_weights(prices):
-    vol = prices.pct_change().std()
-    inv_vol = 1 / (vol + 1e-8)
-    weights = inv_vol / inv_vol.sum()
-    return weights.values
+# --- AI OPTIMIZATION: ML-BASED SUGGESTED WEIGHTS ---
+def ai_optimize_weights(prices, risk_profile):
+    lookback = min(252, len(prices))
+    returns = prices.pct_change().fillna(0).iloc[-lookback:]
+    X = returns.values
+    y = (prices.iloc[-1] / prices.iloc[0] - 1).values  # total return over period
 
-# --- USER WEIGHTS & AGENTIC FEEDBACK ---
-if weight_method == "Equal Weight":
-    weights = np.repeat(1/len(selected_stocks), len(selected_stocks))
-    method_desc = "Equal weighting gives each stock the same influence, regardless of risk or past performance."
-elif weight_method == "Custom Weights":
-    weights = []
-    st.sidebar.markdown("Enter custom weights (must sum to 1):")
-    for stock in selected_stocks:
-        w = st.sidebar.number_input(
-            f"Weight for {stock}",
-            min_value=0.0,
-            max_value=1.0,
-            value=round(1/len(selected_stocks), 2),
-            step=0.01,
-            key=stock
-        )
-        weights.append(w)
-    weights = np.array(weights)
-    if not np.isclose(weights.sum(), 1.0):
-        st.warning("Custom weights must sum to 1. Adjust your weights.")
-        st.stop()
-    method_desc = "Custom weights let you express your own views or strategies."
-else:  # AI-Guided
-    weights = ai_guided_weights(norm_prices[selected_stocks])
-    st.sidebar.markdown("**AI-Guided Weights (Risk-Aware):**")
-    for stock, w in zip(selected_stocks, weights):
-        st.sidebar.write(f"{stock}: {w:.2f}")
-    method_desc = (
-        "AI-guided weights use a risk-aware approach: stocks with lower volatility get higher weights, "
-        "helping you build a more stable portfolio. This is inspired by 'risk parity' strategies used by leading funds."
-    )
+    model = RandomForestRegressor(n_estimators=100)
+    model.fit(X, y)
+    importances = model.feature_importances_
 
-# --- AGENTIC AI FEEDBACK & SUGGESTIONS ---
-returns = norm_prices[selected_stocks].iloc[-1] / norm_prices[selected_stocks].iloc[0] - 1
-vols = norm_prices[selected_stocks].pct_change().std() * np.sqrt(252)
-portfolio_return = (norm_prices[selected_stocks] * weights).sum(axis=1)
-total_return = (portfolio_return.iloc[-1] / portfolio_return.iloc[0]) - 1
-annualized_vol = portfolio_return.pct_change().std() * np.sqrt(252)
+    # Risk profile adjustment
+    if risk_profile == "Conservative":
+        importances = np.clip(importances, 0, 0.25)
+    elif risk_profile == "Moderate":
+        importances = np.clip(importances, 0, 0.5)
+    optimal_weights = importances / importances.sum()
+    return optimal_weights
 
-# AI critiques and suggestions
-ai_feedback = ""
-ai_suggestion = ""
-flag = False
+ai_weights = ai_optimize_weights(data[selected_stocks], risk_profile)
+ai_index = (norm_prices[selected_stocks] * ai_weights).sum(axis=1)
 
-if weight_method == "Custom Weights":
-    if np.max(weights) > 0.6:
-        ai_feedback += "⚠️ Your portfolio is highly concentrated in one stock. This increases risk and can lead to large swings in performance.\n\n"
-        flag = True
-    if np.min(weights) < 0.05 and len(selected_stocks) > 2:
-        ai_feedback += "ℹ️ You have some stocks with very low weights. Consider if they add value or just add complexity.\n\n"
-    # Compare to AI-guided
-    ai_weights = ai_guided_weights(norm_prices[selected_stocks])
-    ai_portfolio = (norm_prices[selected_stocks] * ai_weights).sum(axis=1)
-    ai_total_return = (ai_portfolio.iloc[-1] / ai_portfolio.iloc[0]) - 1
-    ai_annualized_vol = ai_portfolio.pct_change().std() * np.sqrt(252)
-    if total_return < ai_total_return:
-        ai_suggestion += f"💡 **AI Suggestion:** An AI-guided, risk-aware allocation would have achieved a higher return ({ai_total_return*100:.2f}%) with lower risk ({ai_annualized_vol*100:.2f}% volatility) over this period. Consider using AI-guided weights for a more balanced approach.\n"
-    else:
-        ai_suggestion += f"✅ Your custom allocation outperformed the AI-guided approach in this period. Nice work!\n"
-    if flag:
-        ai_suggestion += "Try spreading your weights more evenly or using the AI-guided method for more stability.\n"
-elif weight_method == "Equal Weight":
-    ai_weights = ai_guided_weights(norm_prices[selected_stocks])
-    ai_portfolio = (norm_prices[selected_stocks] * ai_weights).sum(axis=1)
-    ai_total_return = (ai_portfolio.iloc[-1] / ai_portfolio.iloc[0]) - 1
-    ai_annualized_vol = ai_portfolio.pct_change().std() * np.sqrt(252)
-    ai_feedback += f"ℹ️ Equal weighting is simple and robust. But a risk-aware, AI-guided allocation would have produced a return of {ai_total_return*100:.2f}% with volatility {ai_annualized_vol*100:.2f}% over this period. Try it to see the difference!"
-else:
-    ai_feedback += "✅ You are using AI-guided weights. This approach is designed to reduce risk by allocating more to less volatile stocks, a method used by many professional investors."
-
-# Diversification check
-if np.max(weights) > 0.6:
-    st.warning("⚠️ Your portfolio is highly concentrated in one stock. Consider diversifying for more stability (AI best practice).")
-elif np.max(weights) < 0.4 and len(selected_stocks) > 1:
-    st.success("✅ Good diversification: No single stock dominates your portfolio.")
-
-st.markdown(f"**AI Advisor Tip:** {method_desc}")
-st.markdown(ai_feedback)
-st.markdown(ai_suggestion)
-
-# --- Show Stock Stats ---
-st.markdown("#### Quick Stock Stats")
-stats = pd.DataFrame({
-    "Total Return (%)": (returns * 100).round(2),
-    "Annualized Volatility (%)": (vols * 100).round(2),
-    "Weight": np.round(weights, 2)
-}, index=selected_stocks)
-st.dataframe(stats)
-
-# --- CALCULATE INDEX AND RATIO ---
+# --- INDEX CALCULATION ---
 si = (norm_prices[selected_stocks] * weights).sum(axis=1)
 sp500 = norm_prices['^GSPC']
 ratio = si / sp500
 
+# --- MARKET VALUATION CONTEXT ---
+@st.cache_data(show_spinner=False)
+def get_pe_ratios(tickers):
+    pes = []
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).info
+            pes.append(info.get('trailingPE', np.nan))
+        except Exception:
+            pes.append(np.nan)
+    return pd.Series(pes, index=tickers)
+
+pe_ratios = get_pe_ratios(selected_stocks)
+
+# --- INDIVIDUALIZED FEEDBACK ENGINE ---
+def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method):
+    feedback = []
+    # Explain user selection
+    top_stock = selected_stocks[np.argmax(weights)]
+    feedback.append(
+        f"**You selected:** {', '.join(selected_stocks)}.\n"
+        f"Your largest weight is in **{top_stock}** ({weights[np.argmax(weights)]:.0%})."
+    )
+    # Risk profile context
+    if risk_profile == "Conservative":
+        feedback.append("You indicated a **conservative** risk profile, so a more balanced, diversified allocation is typically preferred.")
+    elif risk_profile == "Aggressive":
+        feedback.append("You indicated an **aggressive** risk profile, so higher weights in growth stocks or concentrated bets are expected.")
+    else:
+        feedback.append("You indicated a **moderate** risk profile, so a mix of growth and stability is appropriate.")
+
+    # Market context
+    if pe_ratios.notna().any():
+        overvalued = pe_ratios[pe_ratios > 40]
+        undervalued = pe_ratios[pe_ratios < 20]
+        if not overvalued.empty:
+            feedback.append(f"⚠️ **High P/E Alert:** {', '.join(overvalued.index)} currently have high P/E ratios, suggesting they may be overvalued.")
+        if not undervalued.empty:
+            feedback.append(f"🟢 **Value Alert:** {', '.join(undervalued.index)} have lower P/E ratios, which may indicate better value.")
+
+    # Weighting advice
+    if weight_method == "Manual" and np.max(weights) > 0.5:
+        feedback.append("⚠️ **Concentration Risk:** More than 50% in one stock increases risk. Diversification can help smooth returns.")
+    elif weight_method == "Manual" and np.max(weights) < 0.3 and len(selected_stocks) > 2:
+        feedback.append("✅ **Good Diversification:** No single stock dominates your portfolio.")
+
+    # Performance comparison
+    if user_return < ai_return:
+        feedback.append(
+            f"💡 **AI Suggestion:** Based on recent market data and your risk profile, our AI recommends an alternative allocation "
+            f"(shown below) that would have produced a higher return ({ai_return*100:.2f}%) than your allocation ({user_return*100:.2f}%)."
+        )
+        feedback.append(
+            "AI-optimized weights are calculated using machine learning on recent price patterns and adjusted for your risk profile."
+        )
+        feedback.append(
+            "Try using the AI-optimized weights for a more tailored, data-driven approach."
+        )
+    elif user_return > ai_return:
+        feedback.append("✅ **Great job!** Your allocation outperformed the AI-optimized approach for this period.")
+    else:
+        feedback.append("ℹ️ Your portfolio performed similarly to the AI-optimized approach.")
+
+    return feedback
+
+user_return = (si.iloc[-1] / si.iloc[0]) - 1
+ai_return = (ai_index.iloc[-1] / ai_index.iloc[0]) - 1
+feedback = generate_feedback(
+    selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method
+)
+
 # --- VISUALIZATION ---
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=si.index, y=si, name="Your Index (SI)", line=dict(width=3)))
+fig.add_trace(go.Scatter(x=si.index, y=si, name="Your Index", line=dict(width=3)))
 fig.add_trace(go.Scatter(x=sp500.index, y=sp500, name="S&P 500", line=dict(width=2, dash='dash')))
+fig.add_trace(go.Scatter(x=ai_index.index, y=ai_index, name="AI-Optimized", line=dict(width=2, dash='dot')))
 fig.update_layout(
-    title="Your Custom Index vs. S&P 500",
+    title="Your Custom Index vs. S&P 500 vs. AI-Optimized",
     xaxis_title="Date",
     yaxis_title="Normalized Value (Base=100)",
     height=500,
     hovermode="x unified"
 )
-
 fig2 = go.Figure()
 fig2.add_trace(go.Scatter(x=ratio.index, y=ratio, name="SI(t) / S&P500(t)", line=dict(width=2, color='purple')))
 fig2.update_layout(
@@ -189,29 +216,23 @@ fig2.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 st.plotly_chart(fig2, use_container_width=True)
 
-# --- EXPLANATION & VALUE ---
+# --- INDIVIDUALIZED EXPLANATION & FEEDBACK ---
 st.markdown("""
 ---
+### **Your Personalized AI Feedback**
+""")
+for msg in feedback:
+    st.markdown(f"- {msg}")
 
-### **Step 2: Foundation — What’s Happening?**
-- **Portfolio Construction:** You select stocks and assign weights, or let the AI suggest weights based on recent volatility (risk-aware).
-- **Agentic AI Guidance:** The system provides instant feedback on diversification, risk, and performance, and suggests improvements or alternatives.
-- **Benchmarking:** The S&P 500 is your reference—see if your custom index outperforms or underperforms.
-- **Educational:** Learn portfolio theory and best practices interactively, with AI feedback.
-
-#### **What is the Index Ratio?**
-- The **Index Ratio** = Your Index (t) / S&P 500 (t)
-- **Above 1:** Outperforming S&P 500. **Below 1:** Underperforming.
-- This gives you a clear, at-a-glance sense of relative performance.
-
-#### **Agentic Value**
-- **Responsive:** The AI adapts its feedback and suggestions to your choices, helping you learn and improve.
-- **Actionable:** Use the platform to explore, optimize, and understand portfolio construction at a professional level.
-
+st.markdown("""
 ---
-
-**Formula:**  
-Your Index (t) ≈ Σ ωᵢ ⋅ (Pᵢ(t)/Pᵢ(0)) × 100  
-S&P 500 (t) ≈ (S(t)/S(0)) × 100  
-Index Ratio = Your Index (t) / S&P 500 (t)
+### **What’s Happening in Step 2: Foundation?**
+- **Portfolio Construction:** Select stocks and assign weights, or let the AI suggest weights based on your risk profile and current market performance.
+- **Formula:**  
+  Your Index (t) ≈ Σ ωᵢ ⋅ (Pᵢ(t)/Pᵢ(0)) × 100  
+  S&P 500 (t) ≈ (S(t)/S(0)) × 100  
+  Index Ratio = Your Index (t) / S&P 500 (t)
+- **Benchmarking:** Compare your custom index to the S&P 500 to see if you’re outperforming or underperforming.
+- **Agentic AI Feedback:**  
+  Personalized, actionable, and educational guidance—unique to your portfolio, your choices, and the market right now.
 """)
