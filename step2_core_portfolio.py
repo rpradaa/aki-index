@@ -8,10 +8,13 @@ import plotly.graph_objects as go
 st.set_page_config(page_title="Agentic AI Portfolio Builder", layout="wide")
 st.markdown("""
     <style>
+    body, .stApp { color: #222 !important; background-color: #f7fafd !important; }
     .metric-label { font-size: 18px; color: #555; }
     .metric-value { font-size: 28px; font-weight: bold; }
-    .advisor-feedback { background: #f6f9fc; border-left: 5px solid #1a73e8; padding: 1em; margin-bottom: 1em; border-radius: 8px;}
-    .section-header { font-size: 22px; color: #1a73e8; margin-top: 2em;}
+    .advisor-feedback { background: #e3f2fd; border-left: 5px solid #1976d2; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
+    .section-header { font-size: 22px; color: #1976d2; margin-top: 2em;}
+    .alt-suggestion { background: #fff8e1; border-left: 5px solid #ffb300; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
+    .peer-feedback { background: #f1f8e9; border-left: 5px solid #388e3c; padding: 1em; margin-bottom: 1em; border-radius: 8px; color: #222;}
     </style>
 """, unsafe_allow_html=True)
 
@@ -161,32 +164,40 @@ def get_pe_ratios(tickers):
 
 pe_ratios = get_pe_ratios(selected_stocks)
 
+# --- PEER COMPARISON ---
+peer_profiles = {
+    "Conservative": np.repeat(1/len(selected_stocks), len(selected_stocks)),
+    "Moderate": ai_optimize_weights(data[selected_stocks], "Moderate"),
+    "Aggressive": ai_optimize_weights(data[selected_stocks], "Aggressive")
+}
+peer_returns = {k: ((norm_prices[selected_stocks] * v).sum(axis=1).iloc[-1] / (norm_prices[selected_stocks] * v).sum(axis=1).iloc[0] - 1) for k, v in peer_profiles.items()}
+
 # --- DETAILED, ADVISOR-LIKE FEEDBACK ENGINE ---
-def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method, investment_goal):
+def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method, investment_goal, peer_returns):
     feedback = []
-    # Explain user selection
+    # Portfolio summary
     top_stock = selected_stocks[np.argmax(weights)]
     feedback.append(
-        f"**Portfolio Summary:**\n"
-        f"- **Stocks Chosen:** {', '.join(selected_stocks)}\n"
-        f"- **Largest Weight:** {top_stock} ({weights[np.argmax(weights)]:.0%})\n"
-        f"- **Risk Profile:** {risk_profile}\n"
-        f"- **Investment Goal:** {investment_goal}"
+        f"<b>Portfolio Summary:</b><br>"
+        f"- <b>Stocks Chosen:</b> {', '.join(selected_stocks)}<br>"
+        f"- <b>Largest Weight:</b> {top_stock} ({weights[np.argmax(weights)]:.0%})<br>"
+        f"- <b>Risk Profile:</b> {risk_profile}<br>"
+        f"- <b>Investment Goal:</b> {investment_goal}"
     )
     # Market context
     if pe_ratios.notna().any():
         overvalued = pe_ratios[pe_ratios > 40]
         undervalued = pe_ratios[pe_ratios < 20]
         if not overvalued.empty:
-            feedback.append(f"⚠️ **High P/E Alert:** {', '.join(overvalued.index)} have high P/E ratios, suggesting potential overvaluation. Consider if these fit your risk and goal.")
+            feedback.append(f"⚠️ <b>High P/E Alert:</b> {', '.join(overvalued.index)} have high P/E ratios. Consider if these fit your risk and goal.")
         if not undervalued.empty:
-            feedback.append(f"🟢 **Value Alert:** {', '.join(undervalued.index)} have lower P/E ratios, which may offer value opportunities.")
+            feedback.append(f"🟢 <b>Value Alert:</b> {', '.join(undervalued.index)} have lower P/E ratios, which may offer value opportunities.")
 
     # Risk & diversification
     if np.max(weights) > 0.5:
-        feedback.append("⚠️ **Concentration Risk:** More than 50% in one stock. This can lead to high volatility and risk. Diversification is generally safer.")
+        feedback.append("⚠️ <b>Concentration Risk:</b> More than 50% in one stock. This can lead to high volatility and risk. Diversification is generally safer.")
     elif np.max(weights) < 0.3 and len(selected_stocks) > 2:
-        feedback.append("✅ **Good Diversification:** No single stock dominates your portfolio. This can help smooth returns and reduce risk.")
+        feedback.append("✅ <b>Good Diversification:</b> No single stock dominates your portfolio. This can help smooth returns and reduce risk.")
 
     # Investment goal alignment
     if investment_goal == "Capital Preservation" and risk_profile != "Conservative":
@@ -197,19 +208,27 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
     # Performance comparison
     if user_return < ai_return:
         feedback.append(
-            f"💡 **AI Suggestion:** Based on recent market data and your risk profile, our AI recommends an alternative allocation "
-            f"(see below) that would have produced a higher return ({ai_return*100:.2f}%) than your allocation ({user_return*100:.2f}%).\n"
-            "Consider using the AI-optimized weights for a more data-driven approach."
+            f"💡 <b>AI Suggestion:</b> Based on recent market data and your risk profile, our AI recommends an alternative allocation "
+            f"(see below) that would have produced a higher return (<b>{ai_return*100:.2f}%</b>) than your allocation (<b>{user_return*100:.2f}%</b>)."
+        )
+        feedback.append(
+            "<b>Alternative:</b> Try using the AI-optimized weights for a more data-driven approach. "
+            "You can also experiment with the <b>What If?</b> scenarios below."
         )
     elif user_return > ai_return:
-        feedback.append("✅ **Great job!** Your allocation outperformed the AI-optimized approach for this period.")
+        feedback.append("✅ <b>Great job!</b> Your allocation outperformed the AI-optimized approach for this period.")
     else:
         feedback.append("ℹ️ Your portfolio performed similarly to the AI-optimized approach.")
 
+    # Peer comparison
+    peer_msgs = []
+    for peer, ret in peer_returns.items():
+        peer_msgs.append(f"{peer}: {ret*100:.2f}%")
+    feedback.append(f"<b>Peer Comparison:</b> Typical {', '.join(peer_msgs)} returns for these stocks and risk profiles.")
+
     # Educational tip
     feedback.append(
-        "🧠 **Portfolio Tip:** "
-        "A strong foundation is built on diversification, risk awareness, and adapting to market conditions. "
+        "🧠 <b>Portfolio Tip:</b> A strong foundation is built on diversification, risk awareness, and adapting to market conditions. "
         "Review your allocations regularly and align them with your long-term goals."
     )
     return feedback
@@ -217,8 +236,25 @@ def generate_feedback(selected_stocks, weights, risk_profile, pe_ratios, user_re
 user_return = (si.iloc[-1] / si.iloc[0]) - 1
 ai_return = (ai_index.iloc[-1] / ai_index.iloc[0]) - 1
 feedback = generate_feedback(
-    selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method, investment_goal
+    selected_stocks, weights, risk_profile, pe_ratios, user_return, ai_return, ai_weights, weight_method, investment_goal, peer_returns
 )
+
+# --- WHAT IF SCENARIO: Toggle between your weights and AI/peer alternatives ---
+st.markdown('<div class="section-header">What If? Scenario Explorer</div>', unsafe_allow_html=True)
+scenario = st.radio("See how your index would perform if you used:", 
+    ["Your Current Weights", "AI-Optimized Weights", "Conservative Peer", "Aggressive Peer"])
+if scenario == "Your Current Weights":
+    scenario_index = si
+    scenario_label = "Your Index"
+elif scenario == "AI-Optimized Weights":
+    scenario_index = ai_index
+    scenario_label = "AI-Optimized"
+elif scenario == "Conservative Peer":
+    scenario_index = (norm_prices[selected_stocks] * peer_profiles["Conservative"]).sum(axis=1)
+    scenario_label = "Conservative Peer"
+else:
+    scenario_index = (norm_prices[selected_stocks] * peer_profiles["Aggressive"]).sum(axis=1)
+    scenario_label = "Aggressive Peer"
 
 # --- METRICS DASHBOARD ---
 st.markdown('<div class="section-header">Portfolio Metrics</div>', unsafe_allow_html=True)
@@ -228,11 +264,10 @@ col2.metric("AI-Optimized Return", f"{ai_return*100:.2f}%", delta=None)
 col3.metric("S&P 500 Return", f"{(sp500.iloc[-1]/sp500.iloc[0] - 1)*100:.2f}%")
 
 # --- VISUALIZATION ---
-st.markdown('<div class="section-header">Performance Comparison</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-header">Performance Comparison: {scenario_label}</div>', unsafe_allow_html=True)
 fig = go.Figure()
-fig.add_trace(go.Scatter(x=si.index, y=si, name="Your Index", line=dict(width=3, color='#1a73e8')))
+fig.add_trace(go.Scatter(x=scenario_index.index, y=scenario_index, name=scenario_label, line=dict(width=3, color='#1a73e8')))
 fig.add_trace(go.Scatter(x=sp500.index, y=sp500, name="S&P 500", line=dict(width=2, dash='dash', color='#34a853')))
-fig.add_trace(go.Scatter(x=ai_index.index, y=ai_index, name="AI-Optimized", line=dict(width=2, dash='dot', color='#fbbc04')))
 fig.update_layout(
     xaxis_title="Date",
     yaxis_title="Normalized Value (Base=100)",
@@ -258,6 +293,17 @@ st.markdown('<div class="section-header">AI Advisor’s Notes</div>', unsafe_all
 for msg in feedback:
     st.markdown(f'<div class="advisor-feedback">{msg}</div>', unsafe_allow_html=True)
 
+# --- ALTERNATIVE SUGGESTION (AI weights) ---
+if user_return < ai_return:
+    st.markdown('<div class="alt-suggestion"><b>Alternative Portfolio Suggestion:</b><br>'
+                'Try these AI-optimized weights for your chosen stocks:<br>' +
+                '<br>'.join([f"{stock}: <b>{w:.2f}</b>" for stock, w in zip(selected_stocks, ai_weights)]) +
+                '</div>', unsafe_allow_html=True)
+
+# --- PEER FEEDBACK ---
+st.markdown('<div class="peer-feedback"><b>How do you compare?</b><br>'
+            'See how your portfolio stacks up versus typical peer allocations for your chosen risk profile.</div>', unsafe_allow_html=True)
+
 # --- CHEAT SHEET / EDUCATION ---
 with st.expander("📚 Step 2 Cheat Sheet: Portfolio Construction & Benchmarking", expanded=False):
     st.markdown("""
@@ -268,6 +314,7 @@ with st.expander("📚 Step 2 Cheat Sheet: Portfolio Construction & Benchmarking
     - **Concentration Risk**: Too much in one stock can lead to big losses.
     - **P/E Ratio**: High = potentially overvalued, Low = potentially undervalued.
     - **Align your risk profile and goals** for best results.
+    - [Watch: Portfolio Construction Explained (YouTube)](https://www.youtube.com/watch?v=F4g3zjR7pYU)
     """)
 
 # --- FINAL EDUCATIONAL CONTEXT ---
@@ -275,7 +322,6 @@ st.markdown("""
 ---
 > **Step 2 Foundation:**  
 > You’ve built a custom index, compared it to the S&P 500, and received individualized, actionable feedback from an AI advisor.  
+> Experiment with weights, scenarios, and peer strategies to deepen your understanding.  
 > This is the foundation for advanced analytics and agentic investing in future steps.
 """)
-
-
